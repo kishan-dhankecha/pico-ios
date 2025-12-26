@@ -331,7 +331,7 @@
     <!-- versions footer -->
     <div class="mt-12 mb-6 text-center opacity-30">
       <p class="text-[10px] font-mono uppercase tracking-widest">
-        Pocket8 v1.3
+        Pocket8 v1.4
       </p>
     </div>
 
