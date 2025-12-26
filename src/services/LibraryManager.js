@@ -96,7 +96,26 @@ export class LibraryManager {
               directory: Directory.Documents,
             });
             coverUri = Capacitor.convertFileSrc(stat.uri);
-          } catch (e) {}
+          } catch (e) {
+            // # Web Fallback: Read file -> Blob URL
+            if (Capacitor.getPlatform() === "web") {
+              try {
+                const fileData = await Filesystem.readFile({
+                  path: imagePath,
+                  directory: Directory.Documents,
+                });
+
+                // data is base64 string on web
+                const blob = await (
+                  await fetch(`data:image/png;base64,${fileData.data}`)
+                ).blob();
+
+                coverUri = URL.createObjectURL(blob);
+              } catch (err) {
+                console.warn("Web image load failed", err);
+              }
+            }
+          }
 
           let path = file.uri;
           if (path.startsWith("file://")) {
@@ -141,6 +160,16 @@ export class LibraryManager {
       });
 
       const base64Data = await base64Promise;
+
+      // # validation
+      // if it's a .p8 (text) file, verify header
+      if (filename.toLowerCase().endsWith(".p8")) {
+        const text = await blob.text();
+        if (!text.includes("pico-8 cartridge") && !text.includes("header")) {
+          console.error("Invalid .p8 header");
+          return false;
+        }
+      }
 
       // # sanitize path logic
       let targetPath = `${CARTS_DIR}/${filename}`;

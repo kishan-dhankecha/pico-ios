@@ -5,10 +5,10 @@
     <!-- mesh gradient background -->
     <div class="fixed inset-0 z-0 pointer-events-none">
       <div
-        class="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-purple-900/40 rounded-full blur-[120px] mix-blend-screen animate-pulse-slow"
+        class="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-purple-800/60 rounded-full blur-[120px] mix-blend-screen animate-pulse-slow"
       ></div>
       <div
-        class="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-blue-900/30 rounded-full blur-[100px] mix-blend-screen"
+        class="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-indigo-800/50 rounded-full blur-[100px] mix-blend-screen"
       ></div>
     </div>
 
@@ -28,7 +28,10 @@
       @click="handleBackgroundClick"
     >
       <!-- header -->
-      <div class="flex flex-col gap-6 mb-8 px-2">
+      <!-- fix: aggressive z-index to beat global toast -->
+      <div
+        class="flex flex-col gap-6 mb-8 px-2 !relative !z-[100] !pointer-events-auto"
+      >
         <!-- title & actions -->
         <div class="flex justify-between items-center">
           <div class="flex flex-col">
@@ -48,7 +51,7 @@
             <!-- import button -->
             <button
               @click="triggerImport"
-              class="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:bg-white/20 transition-all hover:scale-105"
+              class="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:bg-white/20 transition-all hover:scale-105 !relative !z-[9999] !pointer-events-auto"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -62,6 +65,27 @@
                   stroke-linejoin="round"
                   stroke-width="2"
                   d="M12 4v16m8-8H4"
+                />
+              </svg>
+            </button>
+
+            <!-- bbs button -->
+            <button
+              @click="router.push('/bbs')"
+              class="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:bg-white/20 transition-all hover:scale-105"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="w-5 h-5 text-white/80"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
                 />
               </svg>
             </button>
@@ -212,6 +236,9 @@
           @touchstart="startLongPress(game)"
           @touchend="cancelLongPress"
           @touchmove="cancelLongPress"
+          @mousedown="handleMouseDown(game, $event)"
+          @mouseup="cancelLongPress"
+          @mouseleave="cancelLongPress"
           @contextmenu.prevent
           class="group relative aspect-[4/5] rounded-2xl cursor-pointer transition-all duration-300"
           :class="
@@ -514,8 +541,10 @@ import { libraryManager } from "../services/LibraryManager"; // # added import
 
 const router = useRouter();
 const libraryStore = useLibraryStore();
-const { games, loading, searchQuery, sortBy, swapButtons } =
-  storeToRefs(libraryStore);
+// # fix: initialize games as safe computed/ref to prevent crash if store is empty
+const { loading, searchQuery, sortBy, swapButtons } = storeToRefs(libraryStore);
+const games = computed(() => libraryStore.games || []);
+
 const { loadLibrary, addCartridge, removeCartridge, toggleSwapButtons } =
   libraryStore;
 
@@ -593,6 +622,13 @@ async function handleFileImport(event) {
 }
 
 // long press logic
+function handleMouseDown(game, event) {
+  // only left click triggers long press
+  if (event.button === 0) {
+    startLongPress(game);
+  }
+}
+
 function startLongPress(game) {
   if (deleteMode.value) return;
   longPressTimer = setTimeout(() => {
@@ -767,9 +803,23 @@ async function openGame(game) {
     });
 
     // stash
-    localStorage.setItem("pico_handoff_payload", fileData.data);
-    localStorage.setItem("pico_handoff_name", game.name);
-    console.log(`[Library] Stashed ${game.name} for handoff.`);
+    if (fileData.data) {
+      localStorage.setItem("pico_handoff_payload", fileData.data);
+      localStorage.setItem("pico_handoff_name", game.name);
+      console.log(
+        `[Library] Stashed ${
+          game.name
+        } for handoff. Payload Type: ${typeof fileData.data}, Length: ${
+          fileData.data.length
+        }`
+      );
+    } else {
+      console.error(
+        `[Library] CRITICAL: Read file but data is null/undefined! Path: Carts/${game.name}`
+      );
+      alert("Error: Could not read cartridge data.");
+      return;
+    }
 
     // navigate
     window.location.href = `index.html?cart=boot&boot=1&t=${Date.now()}`;

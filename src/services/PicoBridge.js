@@ -26,6 +26,8 @@ window.picoBridge = {
 class Pico8Bridge {
   constructor() {
     this.isActive = false;
+    this.isInitialSyncDone = false;
+    this.isSyncingInProgress = false;
     this.initGlobalState();
   }
 
@@ -64,7 +66,10 @@ class Pico8Bridge {
     // ## prepare global state for injection
     // # storage for poller to pick up
     window._cartdat = cartData;
-    window._cartname = ["cart.png"];
+    // # force name: fixes boot timeout by ensuring engine finds the expected file
+    // regardless of what the user called it (e.g. "My Game.p8.png")
+    const safeCartName = "cart.png";
+    window._cartname = [safeCartName];
 
     // ## configure emscripten module
     window.Module = {
@@ -74,7 +79,8 @@ class Pico8Bridge {
       },
 
       // # force pico-8 to use /appdata for saves/config
-      arguments: ["-run", "/cart.png", "-home", "/appdata"],
+      // # AND force load the specific file we inject (cart.png)
+      arguments: ["-p", "/cart.png"],
 
       // # race condition fix
       noInitialRun: true,
@@ -82,6 +88,8 @@ class Pico8Bridge {
       preRun: [
         function () {
           console.log("[Pico8Bridge] preRun: starting...");
+          // # debugging: global scope check
+          const self = window.picoBridge;
 
           try {
             Filesystem.mkdir({
@@ -90,36 +98,6 @@ class Pico8Bridge {
               recursive: true,
             }).catch(() => {});
           } catch (e) {}
-
-          // ## immediate fs mount
-          try {
-            // # emscripten fs is available in prerun
-            const fs = Module.FS;
-            if (fs) {
-              try {
-                fs.mkdir("/appdata");
-              } catch (e) {}
-              fs.mount(Module.IDBFS, {}, "/appdata");
-              console.log("[PicoBridge] /appdata mounted (preRun)");
-              if (window._cartdat) {
-                try {
-                  console.log("[PicoBridge] pre-creating /cart.png");
-                  Module.FS.createDataFile(
-                    "/",
-                    "cart.png",
-                    new Uint8Array(window._cartdat),
-                    true,
-                    true,
-                    true
-                  );
-                } catch (e) {
-                  console.warn("pre-create failed", e);
-                }
-              }
-            }
-          } catch (e) {
-            console.warn("preRun fs mount skipped", e);
-          }
 
           // ## pulse-start & anti-stall
           console.log("[PicoBridge] pulse-starting engine...");
@@ -161,16 +139,29 @@ class Pico8Bridge {
 
             const canvasEl = document.getElementById("canvas");
             const hasCallMain = engineReady;
-            const hasCart = !!window._cartdat;
 
-            // # debug heartbeat (every 1s)
+            // poller to 'true'
+            let cartExists = false;
+            try {
+              if (fs && fs.analyzePath("/cart.png").exists) {
+                cartExists = true;
+                if (pollCount % 20 === 0)
+                  console.log(
+                    "🚀 [PicoBoot] Poller confirmed /cart.png exists on VFS."
+                  );
+              }
+            } catch (e) {}
+
+            const hasCart = !!window._cartdat || cartExists;
+
+            // debug heartbeat (every 1s)
             if (pollCount % 20 === 0) {
               console.log(
                 `[PicoBoot] poll #${pollCount}: fs=${!!fs}, canvas=${!!canvasEl}, callmain=${hasCallMain}, cart=${hasCart}`
               );
             }
 
-            // # timeout failsafe
+            // timeout failsafe
             if (pollCount > MAX_POLLS) {
               console.error("[Error] TIMEOUT: engine failed to initialize.");
               clearInterval(poller);
@@ -178,103 +169,119 @@ class Pico8Bridge {
               return;
             }
 
-            if (fs) {
-              // # check sync status
-              if (fs) {
-                console.log("[PicoBoot] fs checking in...");
-                // ## pull from native saves
-                if (
-                  window.picoBridge &&
-                  typeof window.picoBridge.syncFromNative === "function"
-                ) {
-                  window.picoBridge.syncFromNative().then(() => {
-                    fs.syncfs(true, (err) => {
-                      if (!err)
-                        console.log("[PicoBoot] initial sync configured");
-                    });
-                  });
-                } else {
-                  // # fallback class method
-                  if (
-                    picoBridge &&
-                    typeof picoBridge.syncFromNative === "function"
-                  ) {
-                    picoBridge.syncFromNative().then(() => {
-                      fs.syncfs(true, (err) => {
-                        if (!err)
-                          console.log("[PicoBoot] initial sync (fallback)");
-                      });
-                    });
-                  } else {
-                    console.warn(
-                      "[Warning] skipping syncFromNative (bridge not ready)"
-                    );
-                  }
-                }
-              }
+            // expose sync methods globally
+            window.picoSave = () => {
+              console.warn(
+                "� [PicoBridge] picoSave blocked during boot debugging."
+              );
+              return Promise.resolve(true);
+            };
 
-              // ## expose sync methods globally
-              window.picoSave = () => {
-                return new Promise((resolve) => {
-                  console.log("💾 [pico8bridge] syncing to disk...");
-                  if (fs) {
-                    fs.syncfs(false, async (err) => {
-                      if (err) {
-                        console.error("[Error] save failed:", err);
-                        resolve(false);
-                      } else {
-                        console.log(
-                          "[OK] idbfs save complete. syncing to native in 500ms..."
-                        );
-                        // # sync gatekeeping
-                        setTimeout(async () => {
-                          if (
-                            window.picoBridge &&
-                            typeof window.picoBridge.syncToNative === "function"
-                          ) {
-                            await window.picoBridge.syncToNative();
-                          }
-                          resolve(true);
-                        }, 500);
-                      }
-                    });
-                  } else {
-                    resolve(false);
-                  }
-                });
-              };
-
-              // ## inject cartridge
-              if (window._cartdat) {
+            // inject cartridge
+            if (window._cartdat) {
+              try {
+                // ensure clean slate
                 try {
-                  // # ensure clean slate
-                  try {
-                    fs.unlink("/cart.png");
-                  } catch (e) {}
+                  fs.unlink("/cart.png");
+                } catch (e) {}
 
-                  // # write file
-                  fs.writeFile("/cart.png", window._cartdat);
+                // the offline patch
+                window.lexaloffle_bbs_player = 0;
 
-                  // # the offline patch
-                  window.lexaloffle_bbs_player = 0;
+                // launch logic
+                // ensure canvas in dom and engine ready
+                if (canvasEl && hasCallMain) {
+                  console.log("[Pico8Bridge] poller: launching engine...");
 
-                  // ## launch logic
-                  // ensure canvas in dom and engine ready
-                  if (canvasEl && hasCallMain) {
-                    console.log("[Pico8Bridge] poller: launching engine...");
+                  // priority 1: bbs download (source of truth)
+                  if (window._bbs_cartdat) {
+                    console.log("🚀 [PicoBoot] BBS SLOT INSERTION");
 
-                    // # the antidote (executed)
-                    if (window._cartdat) {
-                      delete window._cartdat;
+                    let mainCart = "/cart.png";
+                    const data = window._bbs_cartdat;
+
+                    // multi-file support (object that is not a uint8array)
+                    if (
+                      typeof data === "object" &&
+                      !(data instanceof Uint8Array)
+                    ) {
+                      console.log("📂 Multi-File VFS detected");
+                      for (const [fname, content] of Object.entries(data)) {
+                        const path = fname.startsWith("/")
+                          ? fname
+                          : "/" + fname;
+                        try {
+                          fs.unlink(path);
+                        } catch (e) {}
+                        fs.writeFile(path, content);
+                        console.log(`   -> wrote ${path}`);
+
+                        // Heuristic: Prefer .p8 or .png as main, default to first if needed
+                        if (
+                          path === "/cart.p8" ||
+                          path === "/cart.png" ||
+                          path.endsWith(".p8")
+                        ) {
+                          mainCart = path;
+                        }
+                      }
+                    } else {
+                      // single file handling
+                      const isText = typeof data === "string";
+                      mainCart = isText ? "/cart.p8" : "/cart.png";
+
+                      try {
+                        fs.unlink(mainCart);
+                      } catch (e) {}
+                      fs.writeFile(mainCart, data);
+                      console.log(`   -> wrote single file ${mainCart}`);
                     }
 
-                    window.Module.callMain(window.Module.arguments);
+                    // Stop poller & force run
                     clearInterval(poller);
-                    haptics.success();
+
+                    // Clear both slots to prevent race conditions
+                    delete window._bbs_cartdat;
+                    delete window._cartdat;
+
+                    window.Module.arguments = [
+                      "-p",
+                      mainCart,
+                      "-run",
+                      mainCart,
+                    ];
+                    window.Module.callMain(window.Module.arguments);
+                    return;
                   }
-                } catch (e) {
-                  console.error("[Error] vfs/boot error:", e);
+
+                  // priority 2: local library load
+                  if (window._cartdat) {
+                    console.log(
+                      "🚀 [PicoBoot] LOCAL SLOT INSERTION: /cart.png"
+                    );
+
+                    try {
+                      fs.unlink("/cart.png");
+                    } catch (e) {}
+                    fs.writeFile("/cart.png", window._cartdat);
+
+                    clearInterval(poller);
+
+                    // Clear local slot
+                    delete window._cartdat;
+
+                    window.Module.arguments = [
+                      "-p",
+                      "/cart.png",
+                      "-run",
+                      "/cart.png",
+                    ];
+                    window.Module.callMain(window.Module.arguments);
+                    return;
+                  }
                 }
+              } catch (e) {
+                console.error("[Error] vfs/boot error:", e);
               }
             }
           }, 50); // fast poll

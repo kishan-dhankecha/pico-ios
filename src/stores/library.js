@@ -49,8 +49,10 @@ export const useLibraryStore = defineStore("library", () => {
     try {
       await libraryManager.init();
       rawGames.value = await libraryManager.scan();
+      return rawGames.value;
     } catch (e) {
       error.value = e.message;
+      return [];
     } finally {
       loading.value = false;
     }

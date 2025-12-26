@@ -9,16 +9,11 @@ const router = createRouter({
       path: "/",
       name: "library",
       component: Library,
-      beforeEnter: (to, from, next) => {
-        if (to.query.boot) {
-          console.log(
-            "🚀 router: boot flag detected, redirecting to player..."
-          );
-          next({ name: "player", query: to.query });
-        } else {
-          next();
-        }
-      },
+    },
+    {
+      path: "/bbs",
+      name: "bbs",
+      component: () => import("../views/BBSExplorer.vue"),
     },
     {
       path: "/play",

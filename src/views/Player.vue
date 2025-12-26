@@ -188,7 +188,19 @@ onMounted(async () => {
 
     // # logic:
     // if cartId is 'boot', we must use stashed data.
-    if (
+    console.log(
+      `[Player] Handoff Check - ID: ${
+        props.cartId
+      }, StashedName: ${stashedName}, StashedDataLen: ${
+        stashedData ? stashedData.length : "NULL"
+      }`
+    );
+
+    if (props.cartId === "bbs_cart" && window._bbs_cartdat) {
+      console.log("⚡️ [Player] BBS Stash Found!");
+      cartData = window._bbs_cartdat;
+      effectiveCartName = "bbs_cart.p8.png";
+    } else if (
       (props.cartId === "boot" || stashedName === props.cartId) &&
       stashedData
     ) {
@@ -225,6 +237,7 @@ onMounted(async () => {
     // ## boot engine
     if (cartData) {
       // no init() needed, bridge is singleton
+      console.log("⚡️ Booting via slot insertion (cart.p8.png)...");
       await picoBridge.boot(effectiveCartName, cartData);
 
       // # hook into pico-8 internal exit

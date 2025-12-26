@@ -2,6 +2,14 @@
   "appId": "com.jevon.pocket8",
   "appName": "Pocket8",
   "webDir": "dist",
+  "server": {
+    "allowNavigation": [
+      "corsproxy.io",
+      "lexaloffle.com",
+      "www.lexaloffle.com",
+      "api.allorigins.win"
+    ]
+  },
   "plugins": {
     "CapacitorCookies": {
       "enabled": true
