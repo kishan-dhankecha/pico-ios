@@ -1,8 +1,23 @@
-# Pocket8
+<div align="center">
 
-A native PICO-8 emulator for iOS that bridges the gap between web flexibility and native filesystem access!
+  <img src="assets/1024.png" alt="App Icon" width="120" />
 
-[Download the latest build.](https://github.com/jevonlipsey/pico-ios/releases/latest)
+  <h2>Pocket8</h2>
+
+   <h3> A native PICO-8 emulator for iOS. <h3>
+
+
+  <p>
+    <a href="https://github.com/jevonlipsey/pico-ios/releases/latest">
+      ⬇️ Download the latest build
+    </a>
+    &nbsp;•&nbsp;
+    <a href="https://ko-fi.com/jevonlipsey">
+      ☕ Support on Ko-fi
+    </a>
+  </p>
+
+</div>
 
 https://github.com/user-attachments/assets/ec24f92e-d29a-4319-8293-439487d60b35
 
@@ -15,7 +30,12 @@ https://github.com/user-attachments/assets/ec24f92e-d29a-4319-8293-439487d60b35
   <img src="assets/quickload.gif" width="20%" alt="libscroll" />
 </p>
 
-- **Adaptive Controls**: Custom Gameboy-esque controls with beautiful haptics. Emulator works in portrait and landscape modes.
+- **Adaptive Controls**: Custom Gameboy-esque controls with beautiful haptics. Emulator works in portrait and landscape modes. Swap to virtual joystick.
+
+  <p align="center">
+  <img src="assets/xzero-joystick.gif" width="50%" alt="libscroll" />
+</p>
+
 - **Smart Library**: Automatically extracts cartridge labels and metadata, presenting your collection in a polished grid.
 
 <p align="center">
@@ -26,10 +46,10 @@ https://github.com/user-attachments/assets/ec24f92e-d29a-4319-8293-439487d60b35
 
 The core engineering challenge was **reconciling the asynchronous nature of iOS file I/O with the synchronous requirements of the Emscripten/WASM virtual file system.**
 
-PICO-8 demands a synchronous file system. Bridging this gap required completely reverse-engineering the Emscripten boot sequence.
+PICO-8 demands a synchronous file system. Bridging this to iOS required completely reverse-engineering the Emscripten boot sequence.
 
 - **Bootloader Hijacking:** The engine defaults to booting the standard "JELPI" demo cart. To bypass this, I had to intercept the `Module.preRun` lifecycle, manually injecting user code into the WASM heap and forcing the pointer to the correct entry point before the runtime could initialize.
-- **True State Persistence:** I architected a system that dumps the _entire simulated RAM_ (not just the cart data) into a serialized blob. I implemented **GZIP** compression to keep these memory snapshots lightweight, allowing for atomic, instant state restoration.
+- **True State Persistence:** I architected a system that dumps the _entire simulated RAM_ into a serialized blob. I implemented **GZIP** compression to keep these memory snapshots lightweight, allowing for atomic, instant state restoration.
 
 It’s _not_ a browser wrapper; it’s a custom runtime environment built for native iOS, enjoy the speeds!
 
@@ -61,14 +81,19 @@ Add the official source to **SideStore** or **AltStore** to get updates automati
 
 ## Project Status
 
-This is a solo dev project designed to push the limits of WebAssembly-to-Native bridging. While an App Store release is a future possibility that I'm gunning for, the current priority is maintaining an uncompromised, open-source experience for the PICO-8 community.
-
+This is a solo dev project designed to bring the PICO-8 communnity a beautiful native app for iPhones and iPads. I'm aiming to submit this to the AppStore as soon as possible, after all the positive support! Check back soon (:
 ### build from source
 ```bash
 npm install && npx cap sync && npx cap open ios
 ```
 
 ## How to Get Games
+
+### v1.4+
+
+Use the BBS Browser by clicking the globe icon at the top. This lets you search lexaloffle's games in-app!
+
+### Manually:
 
 Pocket8 uses standard PICO-8 cartridges (`.p8` or `.p8.png`).
 
@@ -78,8 +103,6 @@ Pocket8 uses standard PICO-8 cartridges (`.p8` or `.p8.png`).
     - **Desktop**: Right-click the small "Cart" icon -> "Save Image As".
     - **iOS**: Tap and hold the cart image -> "Save to Files".
 4.  **Import**: In Pocket8, tap the `+` icon and select your saved `.p8.png` file.
-
-**Pro Tip:** If you see a file named `thumb.png` or `cover.png ...`, that's usually just a picture. You specifically need the file that often ends in `.p8.png` and looks like a game cartridge.
 
 ## Acknowledgements
 
