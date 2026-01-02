@@ -1,11 +1,21 @@
 import { Filesystem, Directory, Encoding } from "@capacitor/filesystem";
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
+import { ScopedStorage } from "@daniele-rolli/capacitor-scoped-storage";
 
 const ROOT = "";
 const CARTS_DIR = "Carts";
-const IMAGES_DIR = "Images";
+const CACHE_DIR = "Cache";
 const SAVES_DIR = "Saves";
 const LIBRARY_FILE = "library.json";
+
+// internal appdata path for android
+const ANDROID_APPDATA = "Pocket8";
+
+const getAppDataDir = () => {
+  return Capacitor.getPlatform() === "android"
+    ? Directory.Data
+    : Directory.Documents;
+};
 
 export class LibraryManager {
   constructor() {
@@ -13,70 +23,98 @@ export class LibraryManager {
     this.metadata = {};
     this.initialized = false;
     this.rootDir = "";
+    this.isScoped = false; // true if using scoped storage
+    this.scopedFolder = null;
   }
 
   async init() {
     if (this.initialized) return;
 
     try {
-      // initialize root dir preference
+      // Load saved root directory (Cart Source)
       const savedRoot = localStorage.getItem("pico_root_dir");
-      if (savedRoot !== null) {
-        this.rootDir = savedRoot;
-      } else {
-        // platform defaults
-        if (Capacitor.getPlatform() === "android") {
-          this.rootDir = null;
-        } else {
-          this.rootDir = "";
+
+      // Check if it's a JSON folder object ASF
+      this.scopedFolder = null;
+      this.isScoped = false;
+
+      if (savedRoot && savedRoot.startsWith("{")) {
+        try {
+          this.scopedFolder = JSON.parse(savedRoot);
+          this.rootDir = this.scopedFolder.id; // content:// URI
+          this.isScoped = true;
+          console.log(
+            "[LibraryManager] Loaded scoped folder:",
+            this.scopedFolder
+          );
+        } catch (e) {
+          console.error("[LibraryManager] Failed to parse folder JSON:", e);
         }
-        if (this.rootDir !== null) {
-          localStorage.setItem("pico_root_dir", this.rootDir);
+      } else {
+        this.rootDir = savedRoot;
+      }
+
+      const isAndroid = Capacitor.getPlatform() === "android";
+
+      if (!this.rootDir) {
+        if (isAndroid) {
+          this.rootDir = null; // android requires user to pick a folder
+        } else {
+          this.rootDir = ""; // iOS: Documents root (flat sandbox)
         }
       }
 
-      // ensure directories exist
-      const ensureDir = async (path) => {
-        // block specific dirs if rootDir is unset
-        if (this.rootDir === null) return;
+      // ==============================
+      // -------DIRECTORY SETUP-------
+      // ==============================
+      // android: appdata (cache, saves, library.json) lives in documents/pocket8/
+      // ios: everything lives together in documents/ (rootdir is "" or subfolder)
 
-        const fullPath = this.rootDir ? `${this.rootDir}/${path}` : path;
+      const ensureInternalDir = async (subPath) => {
+        // Determine the actual path based on platform
+        let targetPath;
+        if (isAndroid) {
+          // android: always use internal pocket8 folder for appdata
+          targetPath = `${ANDROID_APPDATA}/${subPath}`;
+        } else {
+          // ios: use rootdir prefix if set
+          targetPath = this.rootDir ? `${this.rootDir}/${subPath}` : subPath;
+        }
+
         try {
-          // check existence first
           await Filesystem.stat({
-            path: fullPath,
-            directory: Directory.Documents,
+            path: targetPath,
+            directory: getAppDataDir(),
           });
         } catch (e) {
-          // # try to create if missing
           try {
             await Filesystem.mkdir({
-              path: fullPath,
-              directory: Directory.Documents,
+              path: targetPath,
+              directory: getAppDataDir(),
               recursive: true,
             });
-          } catch (mkdirError) {
-            // silently fail
+          } catch (err) {
+            /* silent */
           }
         }
       };
 
-      // ensure root itself
-      if (this.rootDir !== null && this.rootDir !== "") {
-        await ensureDir("");
-      }
+      // ensure appdata dirs
+      await ensureInternalDir(CACHE_DIR);
+      await ensureInternalDir(SAVES_DIR);
 
-      await ensureDir(CARTS_DIR);
-      await ensureDir(IMAGES_DIR);
-      await ensureDir(SAVES_DIR);
-      await ensureDir("Data");
+      // ensure carts dir
+      await ensureInternalDir(CARTS_DIR);
 
       // load metadata
       try {
-        const libraryPath = this.resolvePath(LIBRARY_FILE);
+        let libPath = this.isScoped
+          ? `Pocket8/${LIBRARY_FILE}`
+          : this.resolvePath(LIBRARY_FILE);
+
         const result = await Filesystem.readFile({
-          path: libraryPath,
-          directory: Directory.Documents,
+          path: libPath,
+          directory: getAppDataDir(),
           encoding: Encoding.UTF8,
         });
         this.metadata = JSON.parse(result.data);
@@ -85,27 +123,75 @@ export class LibraryManager {
       }
 
       await this.cleanupLegacy();
-      await this.scan();
+
+      // cache attempt
+      const cached = localStorage.getItem("pico_cached_games");
+      if (cached) {
+        try {
+          this.games = JSON.parse(cached);
+          console.log(
+            `[LibraryManager] Loaded ${this.games.length} games from cache.`
+          );
+        } catch (e) {
+          console.warn("Invalid cache", e);
+        }
+      }
+
+      // if no cache, scan
+      if (this.games.length === 0) {
+        await this.scan();
+      }
+
       this.initialized = true;
     } catch (e) {
-      // silent failure
       console.error("Library init failed", e);
     }
   }
 
-  // helper to join root with path
   resolvePath(path) {
+    const isAndroid = Capacitor.getPlatform() === "android";
+
+    // app data - saves always internal
+    if (
+      path === LIBRARY_FILE ||
+      path.startsWith(CACHE_DIR) ||
+      path.startsWith(SAVES_DIR) ||
+      path.startsWith(CARTS_DIR)
+    ) {
+      if (path.startsWith(CARTS_DIR) && this.isScoped) {
+        if (isAndroid) return `${ANDROID_APPDATA}/${path}`;
+      }
+
+      if (
+        path === LIBRARY_FILE ||
+        path.startsWith(CACHE_DIR) ||
+        path.startsWith(SAVES_DIR)
+      ) {
+        if (isAndroid) {
+          return `${ANDROID_APPDATA}/${path}`;
+        }
+        // ios: use rootDir prefix
+        return this.rootDir ? `${this.rootDir}/${path}` : path;
+      }
+    }
+
+    // carts - external on android (scoped uri), internal on ios
+    if (this.isScoped) {
+      return this.rootDir;
+    }
+
+    // ios / legacy: standard path res
     if (this.rootDir === null) return null;
     if (!path) return this.rootDir || "";
     return this.rootDir ? `${this.rootDir}/${path}` : path;
   }
 
   async setRootDirectory(newPath) {
-    // strict sanitization
-    newPath = newPath.replace(/[^\w\s\-\.]/gi, "").trim();
-
     this.rootDir = newPath;
     localStorage.setItem("pico_root_dir", this.rootDir);
+
+    // clear cache when changing root
+    localStorage.removeItem("pico_cached_games");
 
     // re-init / re-scan
     this.initialized = false;
@@ -118,98 +204,172 @@ export class LibraryManager {
   }
 
   async scan() {
-    const games = [];
-    const scanPath = this.resolvePath(CARTS_DIR);
+    const isWeb = Capacitor.getPlatform() === "web";
 
-    try {
-      const result = await Filesystem.readdir({
-        path: scanPath,
-        directory: Directory.Documents,
-      });
+    // Build hidden carts
+    const hiddenCarts = new Set();
+    Object.values(this.metadata).forEach((meta) => {
+      if (meta.subCarts && Array.isArray(meta.subCarts))
+        meta.subCarts.forEach((sc) => hiddenCarts.add(sc));
+    });
 
-      // build set of hidden sub-carts from metadata to exclude them from the shelf
-      const hiddenCarts = new Set();
-      Object.values(this.metadata).forEach((meta) => {
-        if (meta.subCarts && Array.isArray(meta.subCarts)) {
-          meta.subCarts.forEach((sc) => hiddenCarts.add(sc));
-        }
-      });
+    let games = [];
+    let source = "legacy";
 
-      const scanPromises = result.files
-        .filter(
-          (file) =>
-            (file.name.endsWith(".p8.png") || file.name.endsWith(".p8")) &&
-            !hiddenCarts.has(file.name)
-        )
-        .map(async (file) => {
-          const id = file.name;
-          const meta = this.metadata[id] || { playCount: 0, lastPlayed: 0 };
-          const baseName = file.name.replace(/\.p8(\.png)?$/, "");
-          const imagePath = this.resolvePath(`${IMAGES_DIR}/${baseName}.png`);
-          let coverUri = null;
-
-          // handle image loading (web vs native)
-          if (Capacitor.getPlatform() === "web") {
-            try {
-              const fileData = await Filesystem.readFile({
-                path: imagePath,
-                directory: Directory.Documents,
-              });
-
-              // data is base64 string on web
-              const blob = await (
-                await fetch(`data:image/png;base64,${fileData.data}`)
-              ).blob();
-
-              coverUri = URL.createObjectURL(blob);
-            } catch (err) {
-              // image might not exist
-            }
-          } else {
-            // native: use direct uri
-            try {
-              const stat = await Filesystem.getUri({
-                path: imagePath,
-                directory: Directory.Documents,
-              });
-              coverUri = Capacitor.convertFileSrc(stat.uri);
-            } catch (e) {
-              // ignore
-            }
-          }
-
-          let path = file.uri;
-          if (path.startsWith("file://")) {
-            path = path.replace("file://", "");
-          }
-
-          return {
-            name: meta.displayName || this.getStemName(file.name),
-            filename: file.name, // or metadata lookups
-            id: id,
-            path: path,
-            lastPlayed: meta.lastPlayed,
-            playCount: meta.playCount,
-            cover: coverUri || null,
-            mtime: parseInt(file.mtime) || 0,
-            isFavorite: !!meta.isFavorite,
-          };
+    // list files
+    if (this.isScoped && this.scopedFolder) {
+      source = "scoped";
+      try {
+        console.log(`[LibraryManager] Scoped scan: ${this.scopedFolder.name}`);
+        const result = await ScopedStorage.readdir({
+          folder: this.scopedFolder,
         });
-
-      const loadedGames = await Promise.all(scanPromises);
-      games.push(...loadedGames);
-      console.log(
-        `[shelf] ${games.length} games ready (hidden: ${hiddenCarts.size}).`
-      );
-    } catch (e) {
-      // silent catch
+        if (result && result.entries) {
+          games = result.entries
+            .filter(
+              (f) =>
+                !f.isDir &&
+                (f.name.endsWith(".p8.png") || f.name.endsWith(".p8"))
+            )
+            .filter((f) => !hiddenCarts.has(f.name))
+            .map((file) => {
+              const id = file.name;
+              const meta = this.metadata[id] || { playCount: 0, lastPlayed: 0 };
+              return {
+                name: meta.displayName || this.getStemName(file.name),
+                filename: file.name,
+                id: id,
+                path: `${this.scopedFolder.id}/${encodeURIComponent(
+                  file.name
+                )}`,
+                lastPlayed: meta.lastPlayed,
+                playCount: meta.playCount,
+                cover: null, // Lazy
+                mtime: file.mtime || 0,
+                isFavorite: !!meta.isFavorite,
+              };
+            });
+        }
+      } catch (e) {
+        console.error("Scoped scan list fail", e);
+      }
+    } else {
+      // legacy
+      try {
+        const scanPath = this.resolvePath(CARTS_DIR);
+        const result = await Filesystem.readdir({
+          path: scanPath,
+          directory: getAppDataDir(),
+        });
+        games = result.files
+          .filter((f) => f.name.endsWith(".p8.png") || f.name.endsWith(".p8"))
+          .filter((f) => !hiddenCarts.has(f.name))
+          .map((file) => {
+            const id = file.name;
+            const meta = this.metadata[id] || { playCount: 0, lastPlayed: 0 };
+            let path = file.uri;
+            if (path && path.startsWith("file://"))
+              path = path.replace("file://", "");
+            return {
+              name: meta.displayName || this.getStemName(file.name),
+              filename: file.name,
+              id: id,
+              path: path || file.name,
+              lastPlayed: meta.lastPlayed,
+              playCount: meta.playCount,
+              cover: null, // Lazy
+              mtime: parseInt(file.mtime) || 0,
+              isFavorite: !!meta.isFavorite,
+              fileUri: file.uri,
+            };
+          });
+      } catch (e) {
+        console.warn("Legacy scan list fail", e);
+      }
     }
 
-    // sort by last played descending
-    games.sort((a, b) => b.lastPlayed - a.lastPlayed);
-
+    console.log(
+      `[LibraryManager] List complete: ${games.length} games. Starting lazy cover load.`
+    );
+    games.sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0));
     this.games = games;
+    localStorage.setItem("pico_cached_games", JSON.stringify(this.games));
+
+    // kick off lazy load
+
     return games;
+  }
+
+  async loadCovers(games) {
+    const isWeb = Capacitor.getPlatform() === "web";
+    const source = this.isScoped && this.scopedFolder ? "scoped" : "legacy";
+    const CHUNK = 5;
+
+    console.log(
+      `[LibraryManager] Starting lazy load for ${games.length} items. Source: ${source}`
+    );
+
+    for (let i = 0; i < games.length; i += CHUNK) {
+      const batch = games.slice(i, i + CHUNK);
+      await Promise.all(
+        batch.map(async (game) => {
+          if (game.cover) return;
+          try {
+            let coverUri = null;
+            if (source === "scoped") {
+              const cachePath = `${CACHE_DIR}/${game.filename}`;
+              const loadCache = async () => {
+                try {
+                  const r = await Filesystem.readFile({
+                    path: this.resolvePath(cachePath),
+                    directory: getAppDataDir(),
+                  });
+                  return `data:image/png;base64,${r.data}`;
+                } catch (e) {
+                  return null;
+                }
+              };
+              coverUri = await loadCache();
+              if (!coverUri && this.scopedFolder) {
+                try {
+                  const { data } = await ScopedStorage.readFile({
+                    folder: this.scopedFolder,
+                    path: game.filename,
+                    encoding: "base64",
+                  });
+                  await Filesystem.writeFile({
+                    path: this.resolvePath(cachePath),
+                    data: data,
+                    directory: getAppDataDir(),
+                    recursive: true,
+                  });
+                  coverUri = `data:image/png;base64,${data}`;
+                } catch (e) {}
+              }
+            } else {
+              if (isWeb) {
+                try {
+                  const scanPath = this.resolvePath(CARTS_DIR);
+                  const r = await Filesystem.readFile({
+                    path: `${scanPath}/${game.filename}`,
+                    directory: getAppDataDir(),
+                  });
+                  const blob = await (
+                    await fetch(`data:image/png;base64,${r.data}`)
+                  ).blob();
+                  coverUri = URL.createObjectURL(blob);
+                } catch (e) {}
+              } else if (game.fileUri) {
+                coverUri = Capacitor.convertFileSrc(game.fileUri);
+              }
+            }
+            if (coverUri) game.cover = coverUri;
+          } catch (e) {}
+        })
+      );
+      await new Promise((r) => setTimeout(r, 20)); // yield
+    }
+    localStorage.setItem("pico_cached_games", JSON.stringify(this.games));
   }
 
   // helper: stem logic (tail-stripper)
@@ -431,14 +591,12 @@ export class LibraryManager {
       await Filesystem.writeFile({
         path: this.resolvePath(`${CARTS_DIR}/${file.name}`), // use updated file.name
         data: file.data,
-        directory: Directory.Documents,
+        directory: getAppDataDir(),
       });
 
       if (file === leader) {
-        // extract image for leader
-        if (file.isPng || file.name.endsWith(".p8.png")) {
-          await this.extractImage(file.name, file.data);
-        }
+        // Leader: No extra image extraction needed.
+        // The .p8.png IS the image.
       } else {
         // link sub-cart
         subCarts.push(file.name);
@@ -485,30 +643,36 @@ export class LibraryManager {
     });
   }
 
-  // helper: extract/save image
-  async extractImage(filename, base64Data) {
-    const baseName = filename
-      .replace(/\.p8(\.png)?$/, "")
-      .replace(/\.png$/, "");
-    try {
-      await Filesystem.writeFile({
-        path: this.resolvePath(`${IMAGES_DIR}/${baseName}.png`),
-        data: base64Data,
-        directory: Directory.Documents,
-      });
-    } catch (e) {}
-  }
-
   async loadCartData(relativePath) {
-    try {
-      const res = await Filesystem.readFile({
-        path: this.resolvePath(`${CARTS_DIR}/${relativePath}`),
-        directory: Directory.Documents,
-      });
-      return res.data; // base64
-    } catch (e) {
-      console.warn(`[library_manager] failed to load data: ${relativePath}`);
-      return null;
+    if (this.isScoped && this.scopedFolder) {
+      // android scoped storage: read from external uri
+      try {
+        const { data } = await ScopedStorage.readFile({
+          folder: this.scopedFolder,
+          path: relativePath,
+          encoding: "base64",
+        });
+        return data;
+      } catch (e) {
+        console.warn(
+          `[library_manager] failed to load scoped cart: ${relativePath}`,
+          e
+        );
+        return null;
+      }
+    } else {
+      // legacy / ios / web
+      try {
+        const isAndroid = Capacitor.getPlatform() === "android";
+        const res = await Filesystem.readFile({
+          path: this.resolvePath(`${CARTS_DIR}/${relativePath}`),
+          directory: isAndroid ? Directory.Data : Directory.Documents,
+        });
+        return res.data; // base64
+      } catch (e) {
+        console.warn(`[library_manager] failed to load data: ${relativePath}`);
+        return null;
+      }
     }
   }
 
@@ -566,7 +730,7 @@ export class LibraryManager {
           try {
             await Filesystem.deleteFile({
               path: this.resolvePath(`${CARTS_DIR}/${sub}`),
-              directory: Directory.Documents,
+              directory: getAppDataDir(),
             });
           } catch (e) {
             /* ignore missing file */
@@ -580,18 +744,17 @@ export class LibraryManager {
       // delete main cartridge
       await Filesystem.deleteFile({
         path: this.resolvePath(`${CARTS_DIR}/${filename}`),
-        directory: Directory.Documents,
+        directory: getAppDataDir(),
       });
 
-      // delete cover image
-      const baseName = filename.replace(/\.p8(\.png)?$/, "");
+      // delete cached file (android)
       try {
         await Filesystem.deleteFile({
-          path: this.resolvePath(`${IMAGES_DIR}/${baseName}.png`),
-          directory: Directory.Documents,
+          path: this.resolvePath(`${CACHE_DIR}/${filename}`),
+          directory: getAppDataDir(),
         });
       } catch (e) {
-        // image might not exist
+        // cache might not exist
       }
 
       // remove from metadata
@@ -613,7 +776,7 @@ export class LibraryManager {
       await Filesystem.writeFile({
         path: this.resolvePath(LIBRARY_FILE),
         data: JSON.stringify(this.metadata),
-        directory: Directory.Documents,
+        directory: getAppDataDir(),
         encoding: Encoding.UTF8,
       });
     } catch (e) {
@@ -628,13 +791,13 @@ export class LibraryManager {
     try {
       const stat = await Filesystem.stat({
         path: checkPath,
-        directory: Directory.Documents,
+        directory: getAppDataDir(),
       });
 
       // validate existing file (prevent cached garbage)
       const data = await Filesystem.readFile({
         path: checkPath,
-        directory: Directory.Documents,
+        directory: getAppDataDir(),
         // no encoding = get raw base64
       });
 
@@ -658,7 +821,7 @@ export class LibraryManager {
       try {
         await Filesystem.deleteFile({
           path: checkPath,
-          directory: Directory.Documents,
+          directory: getAppDataDir(),
         });
       } catch (delErr) {
         /* ignore */
@@ -732,15 +895,8 @@ export class LibraryManager {
       await Filesystem.writeFile({
         path: checkPath,
         data: base64,
-        directory: Directory.Documents,
+        directory: getAppDataDir(),
       });
-
-      // also extract image for the shelf
-      try {
-        await this.extractImage(targetFilename, base64);
-      } catch (e) {
-        /* ignore image extract fail */
-      }
 
       // refresh library so it appears in the list
       await this.scan();

@@ -6,14 +6,16 @@
     <!-- game zone -->
     <div
       class="game-zone flex-1 relative flex items-center justify-center overflow-hidden w-full landscape:h-full landscape:w-full landscape:px-[max(env(safe-area-inset-left),30px)] landscape:pr-[max(env(safe-area-inset-right),30px)] landscape:py-4 pointer-events-none"
+      :class="{ '!h-full !pb-0': fullscreen }"
     >
       <div
         id="canvas-container"
         ref="canvasContainer"
         class="relative flex items-center justify-center p-1 portrait:pb-8 w-full h-full pointer-events-auto"
+        :class="{ '!p-0 !pb-0': fullscreen }"
       >
         <canvas
-          class="aspect-square w-full h-full object-contain portrait:object-bottom landscape:object-center image-pixelated rounded-sm transition-shadow duration-300"
+          class="aspect-square w-full h-full object-contain portrait:object-center landscape:object-center image-pixelated rounded-sm transition-shadow duration-300"
           :class="{ 'shadow-2xl shadow-black/50': isMenuOpen }"
           id="canvas"
           oncontextmenu="event.preventDefault()"
@@ -90,13 +92,35 @@
     ></div>
 
     <!-- controller zone -->
-    <!-- portrait: fixed height block at bottom -->
-    <!-- landscape: absolute overlay -->
     <div
+      v-if="!fullscreen"
       class="controller-zone relative shrink-0 z-50 portrait:h-[410px] portrait:w-full portrait:bg-black/80 portrait:backdrop-blur-xl portrait:p-1 landscape:absolute landscape:inset-0 landscape:pointer-events-none"
     >
       <VirtualController @menu="toggleMenu" />
     </div>
+
+    <!-- fullscreen home button -->
+    <button
+      v-if="fullscreen"
+      @click="toggleMenu"
+      @touchstart.prevent="toggleMenu"
+      class="absolute top-8 right-8 z-[70] w-12 h-12 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 flex items-center justify-center opacity-15 hover:opacity-100 active:opacity-100 transition-opacity duration-300"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        class="h-6 w-6 text-white"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M4 6h16M4 12h16m-7 6h7"
+        />
+      </svg>
+    </button>
 
     <!-- global toast usage -->
     <!-- saves drawer -->
@@ -111,6 +135,7 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref, watch, computed } from "vue";
+import { storeToRefs } from "pinia";
 import { haptics } from "../utils/haptics";
 import { ImpactStyle } from "@capacitor/haptics";
 import { useRouter, useRoute } from "vue-router";
@@ -139,28 +164,16 @@ import { libraryManager } from "../services/LibraryManager";
 import { useToast } from "../composables/useToast";
 import { useLibraryStore } from "../stores/library";
 
-import { Fullscreen } from "@boengli/capacitor-fullscreen";
+import { App } from "@capacitor/app";
 
 const { showToast } = useToast();
+const { fullscreen } = storeToRefs(useLibraryStore());
 
 const activeCartName = ref(
   props.cartId === "boot" ? "boot" : props.cartId.replace(".p8.png", "")
 );
 
-const ensureImmersiveMode = async () => {
-  if (Capacitor.getPlatform() === "android") {
-    try {
-      await Fullscreen.activateImmersiveMode();
-    } catch (e) {
-      console.warn("[player] failed to activate immersive mode", e);
-    }
-  }
-};
-
 onMounted(async () => {
-  // immersive mode
-  await ensureImmersiveMode();
-
   // helper: verify binary injection
   const base64ToUint8Array = (base64) => {
     try {
@@ -369,13 +382,8 @@ onUnmounted(async () => {
   stopAutoSaveTimer();
   picoBridge.shutdown();
 
-  if (Capacitor.getPlatform() === "android") {
-    try {
-      await Fullscreen.showSystemBars();
-    } catch (e) {
-      console.warn("[player] failed to restore system bars", e);
-    }
-  }
+  if (gamepadLoopId) cancelAnimationFrame(gamepadLoopId);
+  App.removeAllListeners("backButton");
 });
 
 const isMuted = ref(false);
@@ -605,7 +613,104 @@ function handleGlobalKeydown(e) {
 // attach listener
 onMounted(() => {
   window.addEventListener("keydown", handleGlobalKeydown);
+
+  // gamepad loop
+  startGamepadLoop();
+
+  // android back button
+  App.addListener("backButton", (data) => {
+    console.log("[player] back button pressed. canGoBack:", data.canGoBack);
+    if (isMenuOpen.value) {
+      // close menu if open
+      toggleMenu();
+    } else {
+      // ehh
+      toggleMenu();
+    }
+  });
 });
+
+// gamepad logic
+let gamepadLoopId = null;
+let lastButtonState = {};
+
+const startGamepadLoop = () => {
+  const loop = () => {
+    pollGamepads();
+    gamepadLoopId = requestAnimationFrame(loop);
+  };
+  loop();
+};
+
+const pollGamepads = () => {
+  const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+
+  for (const gp of gamepads) {
+    if (!gp) continue;
+
+    // menu toggle (select)
+    if (gp.buttons[8]?.pressed) {
+      if (!lastButtonState[gp.index + "-menu"]) {
+        toggleMenu();
+        lastButtonState[gp.index + "-menu"] = true;
+      }
+    } else {
+      lastButtonState[gp.index + "-menu"] = false;
+    }
+
+    // menu nav
+    if (isMenuOpen.value && !isSavesDrawerOpen.value) {
+      // dpad up (12) / down (13)
+      // or axis 1 (left stick y)
+      const up = gp.buttons[12]?.pressed || gp.axes[1] < -0.5;
+      const down = gp.buttons[13]?.pressed || gp.axes[1] > 0.5;
+      const select = gp.buttons[0]?.pressed; // A / Cross
+      const back = gp.buttons[1]?.pressed; // B / Circle
+
+      // up
+      if (up) {
+        if (!lastButtonState[gp.index + "-up"]) {
+          focusIndex.value =
+            (focusIndex.value - 1 + menuButtons.value.length) %
+            menuButtons.value.length;
+          lastButtonState[gp.index + "-up"] = true;
+        }
+      } else {
+        lastButtonState[gp.index + "-up"] = false;
+      }
+
+      // down
+      if (down) {
+        if (!lastButtonState[gp.index + "-down"]) {
+          focusIndex.value = (focusIndex.value + 1) % menuButtons.value.length;
+          lastButtonState[gp.index + "-down"] = true;
+        }
+      } else {
+        lastButtonState[gp.index + "-down"] = false;
+      }
+
+      // select (a)
+      if (select) {
+        if (!lastButtonState[gp.index + "-chk"]) {
+          triggerMenuAction(menuButtons.value[focusIndex.value].action);
+          lastButtonState[gp.index + "-chk"] = true;
+        }
+      } else {
+        lastButtonState[gp.index + "-chk"] = false;
+      }
+
+      // back (b) - close menu
+      if (back) {
+        if (!lastButtonState[gp.index + "-back"]) {
+          toggleMenu(); // close
+          lastButtonState[gp.index + "-back"] = true;
+        }
+      } else {
+        lastButtonState[gp.index + "-back"] = false;
+      }
+    }
+  }
+};
 </script>
 
 <style>

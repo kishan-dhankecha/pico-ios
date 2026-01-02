@@ -44,10 +44,15 @@
 
         <div v-else class="flex flex-col gap-2">
           <div
-            v-for="save in saves"
+            v-for="(save, index) in saves"
             :key="save.name"
+            :ref="(el) => (saveItemsRef[index] = el)"
             @click="loadSave(save.name)"
             class="group relative bg-white/5 hover:bg-white/10 active:scale-[0.98] transition-all rounded-xl p-3 border border-white/5 hover:border-white/20 cursor-pointer overflow-hidden"
+            :class="{
+              '!bg-white/20 !border-white/40 ring-2 ring-white/50':
+                focusedIndex === index,
+            }"
           >
             <!-- save icon & info -->
             <div class="flex items-start gap-3">
@@ -146,7 +151,12 @@ const refreshSaves = async () => {
 watch(
   () => props.isOpen,
   (newVal) => {
-    if (newVal) refreshSaves();
+    if (newVal) {
+      refreshSaves();
+      startNavigationLoop();
+    } else {
+      stopNavigationLoop();
+    }
   }
 );
 
@@ -160,6 +170,101 @@ const loadSave = (filename) => {
   console.log("⚡️ [Drawer] Selected:", filename);
   emit("load", filename);
   emit("close");
+};
+
+// gamepad / keyboard nav
+const focusedIndex = ref(-1);
+let gamepadLoopId = null;
+let lastButtonState = {};
+const saveItemsRef = ref([]);
+
+const startNavigationLoop = () => {
+  const loop = () => {
+    pollGamepads();
+    gamepadLoopId = requestAnimationFrame(loop);
+  };
+  loop();
+};
+
+const stopNavigationLoop = () => {
+  if (gamepadLoopId) {
+    cancelAnimationFrame(gamepadLoopId);
+    gamepadLoopId = null;
+  }
+  focusedIndex.value = -1;
+};
+
+const scrollToFocused = () => {
+  if (focusedIndex.value >= 0 && saveItemsRef.value[focusedIndex.value]) {
+    saveItemsRef.value[focusedIndex.value].scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+  }
+};
+
+const pollGamepads = () => {
+  const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const gp of gamepads) {
+    if (!gp) continue;
+
+    // dpad up/down
+    const up = gp.buttons[12]?.pressed || gp.axes[1] < -0.5;
+    const down = gp.buttons[13]?.pressed || gp.axes[1] > 0.5;
+    const select = gp.buttons[0]?.pressed; // A (Cross)
+    const back = gp.buttons[1]?.pressed; // B (Circle)
+
+    // down
+    if (down) {
+      if (!lastButtonState[gp.index + "-down"]) {
+        if (saves.value.length > 0) {
+          focusedIndex.value = (focusedIndex.value + 1) % saves.value.length;
+          scrollToFocused();
+          haptics.impact(ImpactStyle.Light).catch(() => {});
+        }
+        lastButtonState[gp.index + "-down"] = true;
+      }
+    } else {
+      lastButtonState[gp.index + "-down"] = false;
+    }
+
+    // up
+    if (up) {
+      if (!lastButtonState[gp.index + "-up"]) {
+        if (saves.value.length > 0) {
+          focusedIndex.value =
+            (focusedIndex.value - 1 + saves.value.length) % saves.value.length;
+          scrollToFocused();
+          haptics.impact(ImpactStyle.Light).catch(() => {});
+        }
+        lastButtonState[gp.index + "-up"] = true;
+      }
+    } else {
+      lastButtonState[gp.index + "-up"] = false;
+    }
+
+    // select (a)
+    if (select) {
+      if (!lastButtonState[gp.index + "-select"]) {
+        if (focusedIndex.value >= 0 && saves.value[focusedIndex.value]) {
+          loadSave(saves.value[focusedIndex.value].name);
+        }
+        lastButtonState[gp.index + "-select"] = true;
+      }
+    } else {
+      lastButtonState[gp.index + "-select"] = false;
+    }
+
+    // back (b)
+    if (back) {
+      if (!lastButtonState[gp.index + "-back"]) {
+        closeDrawer();
+        lastButtonState[gp.index + "-back"] = true;
+      }
+    } else {
+      lastButtonState[gp.index + "-back"] = false;
+    }
+  }
 };
 
 const formatSize = (bytes) => {

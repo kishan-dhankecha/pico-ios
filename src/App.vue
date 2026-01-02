@@ -31,6 +31,8 @@
 import { ref, onMounted } from "vue";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { App } from "@capacitor/app";
+import { Fullscreen } from "@boengli/capacitor-fullscreen";
+import { Capacitor } from "@capacitor/core";
 import { Dialog } from "@capacitor/dialog";
 import { RouterView, useRouter } from "vue-router";
 import { useToast } from "./composables/useToast";
@@ -45,6 +47,15 @@ const isCheckingEngine = ref(true);
 const showImporter = ref(false);
 
 onMounted(async () => {
+  // android immersive mode
+  if (Capacitor.getPlatform() === "android") {
+    try {
+      await Fullscreen.activateImmersiveMode();
+    } catch (e) {
+      console.warn("[App] failed to activate immersive mode", e);
+    }
+  }
+
   // prep engine
   const hasEngine = await EngineLoader.init();
 

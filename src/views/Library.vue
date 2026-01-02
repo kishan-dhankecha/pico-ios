@@ -52,6 +52,9 @@
             <button
               @click="triggerImport"
               class="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:bg-white/20 transition-all hover:scale-105 !relative !z-[9999] !pointer-events-auto"
+              :class="{
+                'ring-2 ring-purple-500 bg-white/20': headerFocusIndex === 4,
+              }"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -73,6 +76,9 @@
             <button
               @click="openOfficialBBS"
               class="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:bg-white/20 transition-all hover:scale-105"
+              :class="{
+                'ring-2 ring-purple-500 bg-white/20': headerFocusIndex === 3,
+              }"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -94,6 +100,9 @@
             <button
               @click="$router.push('/settings')"
               class="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-md active:bg-white/20 transition-all hover:scale-105"
+              :class="{
+                'ring-2 ring-purple-500 bg-white/20': headerFocusIndex === 2,
+              }"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -142,6 +151,9 @@
               v-model="searchQuery"
               type="text"
               class="block w-full pl-10 pr-3 py-2.5 border border-white/10 rounded-xl leading-5 bg-white/5 text-white placeholder-white/30 focus:outline-none focus:bg-white/10 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 sm:text-sm transition-all"
+              :class="{
+                'ring-2 ring-purple-500 bg-white/20': headerFocusIndex === 0,
+              }"
               placeholder="Search cartridges..."
             />
           </div>
@@ -150,6 +162,9 @@
             <select
               v-model="sortBy"
               class="appearance-none bg-white/5 border border-white/10 text-white py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:bg-white/10 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 text-sm transition-all h-full"
+              :class="{
+                'ring-2 ring-purple-500 bg-white/20': headerFocusIndex === 1,
+              }"
             >
               <option
                 v-for="opt in sortOptions"
@@ -191,6 +206,12 @@
           ></div>
           <span class="text-white/30 text-sm tracking-widest uppercase">
             {{ importProgress || "Scanning" }}
+          </span>
+          <span
+            v-if="scanProgress.show"
+            class="text-white/50 text-xs mt-2 font-mono"
+          >
+            Processing {{ scanProgress.current }} / {{ scanProgress.total }}
           </span>
         </div>
       </transition>
@@ -297,19 +318,40 @@
             @mouseleave="cancelLongPress"
             @contextmenu.prevent
             class="group relative aspect-[4/5] rounded-2xl cursor-pointer transition-all duration-500"
-            :class="
+            :class="[
               deleteMode
                 ? 'animate-wiggle'
-                : 'hover:scale-[1.03] hover:shadow-2xl hover:shadow-pink-500/20'
-            "
+                : 'hover:scale-[1.03] hover:shadow-2xl hover:shadow-pink-500/20',
+              focusedIndex === index
+                ? '!scale-105 ring-4 ring-pink-500 shadow-2xl z-20'
+                : '',
+            ]"
+            :ref="(el) => setItemRef(el, index)"
           >
-            <!-- heart icon (always visible for favorites) -->
+            <!-- heart icon (always visible for favorites or if card menu open) -->
             <div
-              class="absolute -top-2 -right-2 z-20 transition-transform duration-300 hover:scale-110"
+              class="absolute -top-2 -right-2 z-20 transition-transform duration-300"
+              :class="{
+                'scale-110':
+                  (game.filename === cardMenuGameId &&
+                    cardMenuBtnIndex === 0) ||
+                  (!cardMenuGameId &&
+                    false) /* fixed: removed undefined hover check */,
+                'scale-125 ring-2 ring-white rounded-full':
+                  game.filename === cardMenuGameId && cardMenuBtnIndex === 0,
+              }"
+              v-if="
+                favorites.includes(game) ||
+                deleteMode ||
+                game.filename === cardMenuGameId
+              "
             >
               <button
                 @click.stop="handleFavorite(game, $event)"
                 class="rounded-full p-1.5 shadow-lg bg-pink-500 text-white hover:bg-pink-600 transition-colors"
+                :class="{
+                  'bg-gray-500/80 text-white/50': !favorites.includes(game),
+                }"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -327,11 +369,23 @@
             </div>
 
             <!-- edit controls overlay -->
-            <template v-if="deleteMode">
-              <div class="absolute -top-2 -left-2 z-20">
+            <template v-if="deleteMode || game.filename === cardMenuGameId">
+              <!-- rename -->
+              <div
+                class="absolute -top-2 -left-2 z-20"
+                :class="{
+                  'scale-125':
+                    game.filename === cardMenuGameId && cardMenuBtnIndex === 1,
+                }"
+              >
                 <button
                   @click.stop="openRenameModal(game)"
                   class="bg-blue-500 text-white rounded-full p-1 shadow-lg hover:bg-blue-600 transition-colors transform hover:scale-110"
+                  :class="{
+                    'ring-2 ring-white':
+                      game.filename === cardMenuGameId &&
+                      cardMenuBtnIndex === 1,
+                  }"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -345,6 +399,43 @@
                       stroke-linejoin="round"
                       stroke-width="2"
                       d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <!-- delete (only if card menu is open or deleteMode is true) -->
+              <div
+                class="absolute -bottom-2 -right-2 z-20"
+                :class="{
+                  'scale-125':
+                    game.filename === cardMenuGameId && cardMenuBtnIndex === 2,
+                }"
+                v-if="
+                  game.filename === cardMenuGameId || nonFavorites.length > 0
+                "
+              >
+                <button
+                  @click.stop="handleDelete(game, $event)"
+                  class="bg-red-500 text-white rounded-full p-1 shadow-lg hover:bg-red-600 transition-colors transform hover:scale-110"
+                  :class="{
+                    'ring-2 ring-white':
+                      game.filename === cardMenuGameId &&
+                      cardMenuBtnIndex === 2,
+                  }"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M6 18L18 6M6 6l12 12"
                     />
                   </svg>
                 </button>
@@ -431,19 +522,33 @@
           @mouseleave="cancelLongPress"
           @contextmenu.prevent
           class="group relative aspect-[4/5] rounded-2xl cursor-pointer transition-all duration-500"
-          :class="
+          :class="[
             deleteMode
               ? 'animate-wiggle'
-              : 'hover:scale-[1.03] hover:shadow-2xl hover:shadow-purple-500/20'
-          "
+              : 'hover:scale-[1.03] hover:shadow-2xl hover:shadow-purple-500/20',
+            focusedIndex === favorites.length + index
+              ? '!scale-105 ring-4 ring-purple-500 shadow-2xl z-20'
+              : '',
+          ]"
+          :ref="(el) => setItemRef(el, favorites.length + index)"
         >
-          <!-- controls overlay (delete mode) -->
-          <template v-if="deleteMode">
+          <!-- controls overlay (delete mode OR card menu) -->
+          <template v-if="deleteMode || game.filename === cardMenuGameId">
             <!-- favorite toggle (gray) -->
-            <div class="absolute -top-2 -right-2 z-20">
+            <div
+              class="absolute -top-2 -right-2 z-20"
+              :class="{
+                'scale-125':
+                  game.filename === cardMenuGameId && cardMenuBtnIndex === 0,
+              }"
+            >
               <button
                 @click.stop="handleFavorite(game, $event)"
                 class="rounded-full p-1.5 shadow-lg bg-gray-500/80 text-white/50 hover:bg-pink-500 hover:text-white transition-all transform hover:scale-110"
+                :class="{
+                  'ring-2 ring-white !bg-pink-500 !text-white':
+                    game.filename === cardMenuGameId && cardMenuBtnIndex === 0,
+                }"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -461,10 +566,20 @@
             </div>
 
             <!-- rename -->
-            <div class="absolute -top-2 -left-2 z-20">
+            <div
+              class="absolute -top-2 -left-2 z-20"
+              :class="{
+                'scale-125':
+                  game.filename === cardMenuGameId && cardMenuBtnIndex === 1,
+              }"
+            >
               <button
                 @click.stop="openRenameModal(game)"
                 class="bg-blue-500 text-white rounded-full p-1 shadow-lg hover:bg-blue-600 transition-colors transform hover:scale-110"
+                :class="{
+                  'ring-2 ring-white':
+                    game.filename === cardMenuGameId && cardMenuBtnIndex === 1,
+                }"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -486,11 +601,19 @@
             <!-- delete -->
             <div
               class="absolute -bottom-2 -right-2 z-20"
-              v-if="nonFavorites.length > 0"
+              :class="{
+                'scale-125':
+                  game.filename === cardMenuGameId && cardMenuBtnIndex === 2,
+              }"
+              v-if="nonFavorites.length > 0 || game.filename === cardMenuGameId"
             >
               <button
                 @click.stop="handleDelete(game, $event)"
                 class="bg-red-500 text-white rounded-full p-1 shadow-lg hover:bg-red-600 transition-colors transform hover:scale-110"
+                :class="{
+                  'ring-2 ring-white':
+                    game.filename === cardMenuGameId && cardMenuBtnIndex === 2,
+                }"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -579,7 +702,7 @@
             ref="renameInputRef"
             type="text"
             class="w-full bg-black/30 border border-white/10 rounded-xl p-3 text-white focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-all mb-6"
-            @keyup.enter="confirmRename"
+            @keydown.enter.stop.prevent="confirmRename"
           />
           <div class="flex justify-end gap-3">
             <button
@@ -602,14 +725,14 @@
     <!-- versions footer -->
     <div class="mt-12 mb-6 text-center opacity-30">
       <p class="text-[10px] font-mono uppercase tracking-widest">
-        Pocket8 v1.4
+        Pocket8 v1.6
       </p>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref, computed, reactive, nextTick } from "vue";
+import { onMounted, onUnmounted, ref, computed, reactive, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import { useLibraryStore } from "../stores/library";
 import { storeToRefs } from "pinia";
@@ -618,8 +741,244 @@ import { Share } from "@capacitor/share";
 import { haptics } from "../utils/haptics";
 import { ImpactStyle } from "@capacitor/haptics";
 import { libraryManager } from "../services/LibraryManager";
-import { FilePicker } from "@capawesome/capacitor-file-picker";
 import { Capacitor } from "@capacitor/core";
+import { useGamepadGrid } from "../composables/useGamepadGrid";
+import { FilePicker } from "@capawesome/capacitor-file-picker";
+
+const width = ref(window.innerWidth);
+
+// grid cols
+const gridColumns = computed(() => {
+  if (width.value >= 1024) return 5;
+  if (width.value >= 768) return 4;
+  return 2;
+});
+
+const updateWidth = () => {
+  width.value = window.innerWidth;
+};
+onMounted(() => window.addEventListener("resize", updateWidth));
+onUnmounted(() => window.removeEventListener("resize", updateWidth));
+
+const displayGames = computed(() => [
+  ...favorites.value,
+  ...nonFavorites.value,
+]);
+
+// card menu
+const cardMenuGameId = ref(null); // filename of the game with open menu
+const cardMenuBtnIndex = ref(0); // 0: fav, 1: rename, 2: delete
+
+// header
+const headerFocusIndex = ref(-1); // -1 = inactive
+// 0: search, 1: sort, 2: settings, 3: bbs, 4: import
+const headerOrder = ["search", "sort", "settings", "bbs", "import"];
+
+const { focusedIndex, setItemRef } = useGamepadGrid({
+  items: displayGames,
+  columns: gridColumns,
+  onSelect: (game) => openGame(game),
+  onSettings: () => router.push("/settings"),
+  onUpOut: () => {
+    // enter header (focus search)
+    focusedIndex.value = -1;
+    headerFocusIndex.value = 0;
+  },
+  enabled: computed(
+    () => headerFocusIndex.value === -1 && !cardMenuGameId.value
+  ),
+  onMenuToggle: () => {
+    // 'x' / 'y' button handler from gamepad can go here?
+  },
+});
+// watch for 'x' key on grid to open menu
+const handleGridExtras = (e) => {
+  if (
+    focusedIndex.value !== -1 &&
+    !cardMenuGameId.value &&
+    headerFocusIndex.value === -1
+  ) {
+    if (["x", "X", "y", "Y"].includes(e.key)) {
+      // Open card menu for focused game
+      const game = displayGames.value[focusedIndex.value];
+      if (game) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        openCardMenu(game);
+      }
+    }
+  }
+};
+
+// card menu navigation logic
+
+// header navigation logic
+const handleHeaderNav = (e) => {
+  if (headerFocusIndex.value === -1) return;
+
+  // allow typing in search if actually focused
+  if (
+    document.activeElement?.tagName === "INPUT" &&
+    e.key !== "Escape" &&
+    e.key !== "Enter"
+  )
+    return;
+  if (e.key === "Escape") {
+    if (document.activeElement?.tagName === "INPUT") {
+      document.activeElement.blur();
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+    return;
+  }
+
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if ([0, 1].includes(headerFocusIndex.value)) {
+      // Exit Header -> Grid
+      headerFocusIndex.value = -1;
+      focusedIndex.value = 0;
+    } else if ([2, 3, 4].includes(headerFocusIndex.value)) {
+      // Upper row down -> Search/Sort
+      headerFocusIndex.value = 0;
+    }
+    return;
+  }
+
+  if (e.key === "ArrowUp") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (headerFocusIndex.value === 0)
+      headerFocusIndex.value = 2; // search -> settings
+    else if (headerFocusIndex.value === 1) headerFocusIndex.value = 2; // sort -> settings
+    return;
+  }
+
+  if (e.key === "ArrowRight") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (headerFocusIndex.value === 0)
+      headerFocusIndex.value = 1; // search -> sort
+    else if (headerFocusIndex.value === 4)
+      headerFocusIndex.value = 3; // import -> bbs
+    else if (headerFocusIndex.value === 3) headerFocusIndex.value = 2; // bbs -> settings
+    return;
+  }
+
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (headerFocusIndex.value === 1)
+      headerFocusIndex.value = 0; // sort -> search
+    else if (headerFocusIndex.value === 2)
+      headerFocusIndex.value = 3; // settings -> bbs
+    else if (headerFocusIndex.value === 3) headerFocusIndex.value = 4; // bbs -> import
+    return;
+  }
+
+  // actions
+  if (["Enter", " ", "z", "x"].includes(e.key)) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    triggerHeaderAction(headerFocusIndex.value);
+  }
+
+  // handle escape/backspace in header (back to grid)
+  if (["Backspace", "b", "B"].includes(e.key)) {
+    if (headerFocusIndex.value !== -1) {
+      // explicit "back" handling: go back to grid
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      headerFocusIndex.value = -1;
+      focusedIndex.value = 0;
+    }
+  }
+};
+
+const triggerHeaderAction = (idx) => {
+  if (idx === 0) {
+    // search: focus input
+    const input = document.querySelector('input[type="text"]');
+    input?.focus();
+  } else if (idx === 1) {
+    // sort: try showPicker
+    const select = document.querySelector("select");
+    if (select) {
+      select.focus();
+      try {
+        if (select.showPicker) {
+          select.showPicker();
+        } else {
+          // fallback for older browsers: simulate click
+          select.click();
+        }
+      } catch (e) {
+        console.warn("Failed to open select programmatically:", e);
+      }
+    }
+  } else if (idx === 2) router.push("/settings");
+  else if (idx === 3) openOfficialBBS();
+  else if (idx === 4) triggerImport();
+};
+
+const handleCardMenuNav = (e) => {
+  if (!cardMenuGameId.value || showRenameModal.value) return;
+
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (cardMenuBtnIndex.value === 0) cardMenuBtnIndex.value = 1; // fav -> rename
+  }
+  if (e.key === "ArrowRight") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (cardMenuBtnIndex.value === 1) cardMenuBtnIndex.value = 0; // rename -> fav
+  }
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (cardMenuBtnIndex.value !== 2) cardMenuBtnIndex.value = 2; // any -> delete
+  }
+  if (e.key === "ArrowUp") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (cardMenuBtnIndex.value === 2) cardMenuBtnIndex.value = 0; // delete -> fav
+  }
+
+  // actions
+  if (["Enter", " ", "z", "Z", "x", "X"].includes(e.key)) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const game = games.value.find((g) => g.filename === cardMenuGameId.value);
+    if (!game) return;
+
+    if (cardMenuBtnIndex.value === 0) {
+      handleFavorite(game);
+    } else if (cardMenuBtnIndex.value === 1) {
+      openRenameModal(game);
+    } else if (cardMenuBtnIndex.value === 2) {
+      handleDelete(game);
+    }
+  }
+
+  // back / close
+  if (["Escape", "Backspace", "b", "B"].includes(e.key)) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    closeCardMenu();
+  }
+};
+
+const openCardMenu = (game) => {
+  cardMenuGameId.value = game.filename;
+  cardMenuBtnIndex.value = 0; // Reset to Fav
+};
+
+const closeCardMenu = () => {
+  cardMenuGameId.value = null;
+  cardMenuBtnIndex.value = 0;
+};
 
 const router = useRouter();
 const libraryStore = useLibraryStore();
@@ -632,6 +991,7 @@ const {
   swapButtons,
   hapticsEnabled,
   rootDir,
+  scanProgress,
 } = storeToRefs(libraryStore);
 
 const isAndroid = computed(() => Capacitor.getPlatform() === "android");
@@ -833,7 +1193,7 @@ async function confirmRename() {
 }
 
 async function handleDelete(game, event) {
-  event.stopPropagation();
+  event?.stopPropagation();
 
   // ask first
   if (confirm(`Delete ${game.name}? This cannot be undone.`)) {
@@ -886,6 +1246,18 @@ async function openGame(game) {
     alert(`failed to load ${game.name}: ${e.message}`);
   }
 }
+
+onMounted(() => {
+  window.addEventListener("keydown", handleHeaderNav);
+  window.addEventListener("keydown", handleCardMenuNav);
+  window.addEventListener("keydown", handleGridExtras);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleHeaderNav);
+  window.removeEventListener("keydown", handleCardMenuNav);
+  window.removeEventListener("keydown", handleGridExtras);
+});
 </script>
 
 <style scoped>

@@ -5,6 +5,7 @@
       <button
         @click="$router.back()"
         class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center active:bg-white/20 transition-all"
+        :class="{ 'ring-2 ring-purple-500 bg-white/20': headerFocused }"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -52,15 +53,18 @@
         <p>No save files found</p>
       </div>
 
-      <div v-else class="space-y-6 pb-20 overflow-y-auto h-[calc(100vh-10rem)]">
+      <div
+        v-else
+        class="space-y-6 pb-20 overflow-y-auto h-[calc(100vh-10rem)] px-1"
+      >
         <div
-          v-for="group in groupedSaves"
+          v-for="(group, index) in groupedSaves"
           :key="group.title"
           class="animate-fade-in"
         >
           <!-- group header -->
           <h4
-            class="sticky top-16 z-10 bg-[var(--color-oled-black)]/95 backdrop-blur-md py-2 px-1 text-white/40 text-xs font-bold uppercase tracking-widest mb-2 border-b border-white/5"
+            class="py-2 px-1 text-white/40 text-xs font-bold uppercase tracking-widest mb-2 border-b border-white/5"
           >
             {{ group.title }}
           </h4>
@@ -68,9 +72,15 @@
           <!-- group items -->
           <div class="space-y-2">
             <div
-              v-for="save in group.files"
+              v-for="(save, fileIndex) in group.files"
               :key="save.name"
-              class="group flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5 hover:border-white/10 transition-colors"
+              :ref="(el) => setItemRef(el, getGlobalIndex(index, fileIndex))"
+              @click="activeSaveIndex = getGlobalIndex(index, fileIndex)"
+              class="group flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5 hover:border-white/10 transition-colors cursor-pointer"
+              :class="{
+                '!bg-white/20 !border-white/40 ring-2 ring-white/50 scale-[1.01]':
+                  focusedIndex === getGlobalIndex(index, fileIndex),
+              }"
             >
               <div class="flex items-center gap-3 overflow-hidden">
                 <div
@@ -108,7 +118,13 @@
                 <!-- load -->
                 <button
                   @click="loadState(save)"
-                  class="p-2 rounded-lg hover:bg-green-500/20 text-white/40 hover:text-green-400 transition-all"
+                  class="p-2 rounded-lg transition-all"
+                  :class="[
+                    activeSaveIndex === getGlobalIndex(index, fileIndex) &&
+                    activeBtnIndex === 0
+                      ? 'bg-green-500 text-white scale-110 shadow-lg shadow-green-500/20'
+                      : 'text-white/40 hover:bg-green-500/20 hover:text-green-400',
+                  ]"
                   title="Load State"
                 >
                   <svg
@@ -129,7 +145,13 @@
                 <!-- share -->
                 <button
                   @click="shareState(save)"
-                  class="p-2 rounded-lg hover:bg-blue-500/20 text-white/40 hover:text-blue-400 transition-all"
+                  class="p-2 rounded-lg transition-all"
+                  :class="[
+                    activeSaveIndex === getGlobalIndex(index, fileIndex) &&
+                    activeBtnIndex === 1
+                      ? 'bg-blue-500 text-white scale-110 shadow-lg shadow-blue-500/20'
+                      : 'text-white/40 hover:bg-blue-500/20 hover:text-blue-400',
+                  ]"
                   title="Share File"
                 >
                   <svg
@@ -150,7 +172,13 @@
                 <!-- delete -->
                 <button
                   @click.stop="deleteState(save)"
-                  class="p-2 rounded-lg hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-all"
+                  class="p-2 rounded-lg transition-all"
+                  :class="[
+                    activeSaveIndex === getGlobalIndex(index, fileIndex) &&
+                    activeBtnIndex === 2
+                      ? 'bg-red-500 text-white scale-110 shadow-lg shadow-red-500/20'
+                      : 'text-white/40 hover:bg-red-500/20 hover:text-red-400',
+                  ]"
                   title="Delete File"
                 >
                   <svg
@@ -177,7 +205,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
@@ -207,7 +235,7 @@ const groupedSaves = computed(() => {
     }));
 });
 
-const formatDate = (ms) => new Date(ms).toLocaleDateString();
+const formatDate = (ms) => new Date(ms).toLocaleString();
 
 onMounted(async () => {
   loadingSaves.value = true;
@@ -310,4 +338,97 @@ async function deleteState(save) {
     alert("Could not delete file: " + e.message);
   }
 }
+
+// gamepad nav
+import { useGamepadGrid } from "../composables/useGamepadGrid";
+
+const flatSaves = computed(() => groupedSaves.value.flatMap((g) => g.files));
+
+const groupOffsets = computed(() => {
+  let offset = 0;
+  const offsets = [];
+  groupedSaves.value.forEach((g) => {
+    offsets.push(offset);
+    offset += g.files.length;
+  });
+  return offsets;
+});
+
+const getGlobalIndex = (groupIndex, fileIndex) => {
+  return groupOffsets.value[groupIndex] + fileIndex;
+};
+
+const activeSaveIndex = ref(null);
+const activeBtnIndex = ref(0);
+
+const { focusedIndex, setItemRef } = useGamepadGrid({
+  items: flatSaves,
+  columns: ref(1),
+  onSelect: () => {
+    // activate card mode
+    if (activeSaveIndex.value === null) {
+      activeSaveIndex.value = focusedIndex.value;
+      activeBtnIndex.value = 0;
+    }
+  },
+  onBack: () => router.back(),
+  onUpOut: () => {
+    focusedIndex.value = -1;
+    headerFocused.value = true;
+  },
+  enabled: computed(
+    () => !headerFocused.value && activeSaveIndex.value === null
+  ),
+});
+
+const headerFocused = ref(false);
+
+const handleHeaderNav = (e) => {
+  if (headerFocused.value) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      headerFocused.value = false;
+      focusedIndex.value = 0;
+    }
+
+    if (["Enter", " ", "z", "x", "Z", "X"].includes(e.key)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      router.back();
+    }
+  } else if (activeSaveIndex.value !== null) {
+    // card nav
+    const save = flatSaves.value[activeSaveIndex.value];
+    if (!save) return;
+
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      activeBtnIndex.value = Math.max(0, activeBtnIndex.value - 1);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      activeBtnIndex.value = Math.min(2, activeBtnIndex.value + 1);
+    } else if (["Enter", " ", "z", "x", "Z", "X"].includes(e.key)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (activeBtnIndex.value === 0) loadState(save);
+      else if (activeBtnIndex.value === 1) shareState(save);
+      else if (activeBtnIndex.value === 2) deleteState(save);
+    } else if (["Backspace", "Escape", "b"].includes(e.key)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      activeSaveIndex.value = null; // exit card mode
+    }
+  }
+};
+
+onMounted(() => {
+  window.addEventListener("keydown", handleHeaderNav);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleHeaderNav);
+});
 </script>

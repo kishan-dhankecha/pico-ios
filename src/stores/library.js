@@ -7,6 +7,7 @@ export const useLibraryStore = defineStore("library", () => {
   const rawGames = ref([]);
   const loading = ref(false);
   const error = ref(null);
+  const scanProgress = ref({ current: 0, total: 0, show: false });
 
   // ui state
   const searchQuery = ref("");
@@ -33,6 +34,13 @@ export const useLibraryStore = defineStore("library", () => {
   const toggleHaptics = () => {
     hapticsEnabled.value = !hapticsEnabled.value;
     localStorage.setItem("pico_haptics_enabled", hapticsEnabled.value);
+  };
+
+  const fullscreen = ref(localStorage.getItem("pico_fullscreen") === "true");
+
+  const toggleFullscreen = () => {
+    fullscreen.value = !fullscreen.value;
+    localStorage.setItem("pico_fullscreen", fullscreen.value);
   };
 
   const filteredGames = computed(() => {
@@ -69,16 +77,27 @@ export const useLibraryStore = defineStore("library", () => {
   async function loadLibrary() {
     loading.value = true;
     error.value = null;
+    scanProgress.value = { current: 0, total: 0, show: false };
+
+    // attach progress callback
+    libraryManager.onProgress = (current, total) => {
+      scanProgress.value = { current, total, show: true };
+    };
+
     try {
       await libraryManager.init();
       rootDir.value = libraryManager.rootDir; // sync state
       rawGames.value = await libraryManager.scan();
+      libraryManager.loadCovers(rawGames.value);
       return rawGames.value;
     } catch (e) {
       error.value = e.message;
       return [];
     } finally {
       loading.value = false;
+      setTimeout(() => {
+        scanProgress.value.show = false; // hide after delay
+      }, 1000);
     }
   }
 
@@ -88,6 +107,7 @@ export const useLibraryStore = defineStore("library", () => {
       const success = await libraryManager.importFile(file, file.name);
       if (success) {
         rawGames.value = await libraryManager.scan();
+        libraryManager.loadCovers(rawGames.value);
       }
       return success;
     } catch (e) {
@@ -104,6 +124,7 @@ export const useLibraryStore = defineStore("library", () => {
       const success = await libraryManager.importBundle(files);
       if (success) {
         rawGames.value = await libraryManager.scan();
+        libraryManager.loadCovers(rawGames.value);
       }
       return success;
     } catch (e) {
@@ -155,6 +176,7 @@ export const useLibraryStore = defineStore("library", () => {
         rawGames.value[idx].name = newName; // optimistic update of display name
         // refresh for full sync
         rawGames.value = await libraryManager.scan();
+        libraryManager.loadCovers(rawGames.value);
       }
     }
     return success;
@@ -167,6 +189,7 @@ export const useLibraryStore = defineStore("library", () => {
       if (success) {
         rootDir.value = libraryManager.rootDir;
         rawGames.value = await libraryManager.scan();
+        libraryManager.loadCovers(rawGames.value);
       }
       return success;
     } catch (e) {
@@ -177,11 +200,36 @@ export const useLibraryStore = defineStore("library", () => {
     }
   }
 
+  async function rescanLibrary() {
+    loading.value = true;
+    error.value = null;
+    scanProgress.value = { current: 0, total: 0, show: true };
+
+    libraryManager.onProgress = (current, total) => {
+      scanProgress.value = { current, total, show: true };
+    };
+
+    try {
+      rawGames.value = await libraryManager.scan();
+      libraryManager.loadCovers(rawGames.value);
+      return true;
+    } catch (e) {
+      error.value = e.message;
+      return false;
+    } finally {
+      loading.value = false;
+      setTimeout(() => {
+        scanProgress.value.show = false;
+      }, 1000);
+    }
+  }
+
   return {
     games: filteredGames,
     rawGames,
     loading,
     error,
+    scanProgress,
     searchQuery,
     sortBy,
     swapButtons,
@@ -193,11 +241,13 @@ export const useLibraryStore = defineStore("library", () => {
     toggleHaptics,
     updateRootDirectory,
     loadLibrary,
-    loadLibrary,
+    rescanLibrary,
     addCartridge,
     addBundle,
     removeCartridge,
     toggleFavorite,
     renameCartridge,
+    toggleFullscreen,
+    fullscreen: computed(() => fullscreen.value),
   };
 });

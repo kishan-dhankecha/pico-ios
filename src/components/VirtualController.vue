@@ -39,8 +39,9 @@
 
         <!-- d-pad svg -->
         <svg
-          viewBox="0 0 100 100"
+          viewBox="0 0 110 110"
           class="w-full h-full drop-shadow-2xl pointer-events-none"
+          style="overflow: visible"
         >
           <defs>
             <linearGradient
@@ -56,7 +57,11 @@
             </linearGradient>
           </defs>
 
-          <g stroke="rgba(255,255,255,0.2)" stroke-width="0.5">
+          <g
+            stroke="rgba(255,255,255,0.2)"
+            stroke-width="0.5"
+            transform="translate(5,5)"
+          >
             <path
               d="M36 34 V12 A4 4 0 0 1 64 12 V34 H36"
               fill="url(#glass-gradient)"
