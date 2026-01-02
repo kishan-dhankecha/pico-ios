@@ -2,7 +2,7 @@
 
   <img src="assets/icon.png" alt="App Icon" width="120" />
 
-  <h2>Pocket8 • A native PICO-8 emulator for iOS & Android.</h2>
+  <h2>Pocket8 • The native PICO-8 Companion for iOS.</h2>
 
   <p>
     <a href="https://github.com/jevonlipsey/pico-ios/releases/latest">
@@ -20,14 +20,14 @@ https://github.com/user-attachments/assets/ec24f92e-d29a-4319-8293-439487d60b35
 
 ## Features
 
-- **Cross-Platform Native**: Runs flawlessly on **iOS** and **Android** with 100% save-state integrity across app restarts.
+- **Native Engine**: Runs flawlessly on **iOS**, due to the official PICO-8 engine being implemented as a WASM module.
 - **Quick Save & Load**: The **only** PICO-8 experience with instant save states. Freeze time and resume anywhere, across devices.
 
 <p align="center">
   <img src="assets/quickload.gif" width="20%" alt="quickload" />
 </p>
 
-- **Adaptive Controls**: Custom Gameboy-esque controls with beautiful haptics. Works in portrait and landscape. Swap to virtual joystick.
+- **Adaptive Controls**: Custom Gameboy-esque controls with tactile haptics. Works in portrait and landscape. Swap to virtual joystick.
 
 <p align="center">
   <img src="assets/xzero-joystick.gif" width="50%" alt="joystick" />
@@ -61,6 +61,7 @@ It’s _not_ a browser wrapper; it’s a custom runtime environment built for na
 ## Installation
 
 ### iOS (Sideload)
+
 You can sideload Pocket8 via AltStore, SideStore, or Sideloadly.
 
 **Auto-Update Source (Recommended)**
@@ -74,23 +75,30 @@ Add the official source to **SideStore** or **AltStore** to get updates automati
 </p>
 
 **Manual IPA Install**
+
 1. Download `Pocket8.ipa` from [Releases](https://github.com/jevonlipsey/pico-ios/releases/latest).
 2. Sideload via **AltStore**, **SideStore**, or **Sideloadly**.
 3. Enable **Developer Mode** in iOS Settings (Settings > General > Device Management > Your Name).
 
 ### Android (APK)
+
 1. Download `Pocket8-Android.apk` from [Releases](https://github.com/jevonlipsey/pico-ios/releases/latest).
 2. Open the file on your device.
 3. If prompted, allow installation from **Unknown Sources**.
-   *(Note: Play Protect may ask for confirmation. Click "More Details" -> "Install Anyway".)*
+   _(Note: Play Protect may ask for confirmation. Click "More Details" -> "Install Anyway".)_
 
 ## Project Status
 
-This is a solo dev project designed to bring the PICO-8 community a beautiful native app for mobile. I'm aiming to submit this to the App Store and Google Play as soon as possible. Check back soon (:
+Pocket8 is developed in collaboration with **Zep (Lexaloffle)** to be the official BBS Companion app for PICO-8.
+Apart from the PICO-8 engine itself, Pocket8 is a solo dev project designed to bring the community a beautiful native app for mobile.
 
-**Update: I've been in contact with Zep, and we are working on making Pocket8 the main way to play PICO-8 games on mobile! Stay tuned.**
+Aiming to submit to the App Store as soon as possible!
+
+- **iOS:** Our primary focus. Licensed as an official companion for browsing the BBS and playing carts natively.
+- **Android:** Experimental Alpha. While we are supporting current testers, please note that an official Lexaloffle Android build is planned for later this year.
 
 ### Build from Source
+
 ```bash
 npm install && npx cap sync
 npx cap open ios      # for Xcode
@@ -102,19 +110,28 @@ npx cap open android  # for Android Studio
 Pocket8 plays standard `.p8.png` PICO-8 cartridges.
 
 ### 1. Find a Game
+
 Tap the **Globe Icon** in the app to open the [Lexaloffle BBS](https://www.lexaloffle.com/bbs/) in your browser. You can also visit [itch.io](https://itch.io/games/tag-pico-8).
 
 ### 2. Save the Cartridge
+
 **Important:** You need the **cartridge image file**, not a ZIP or EXE.
+
 1.  Find the small square image that looks like a game cartridge (labelled "Cart").
 2.  **Desktop:** Right-click the image -> "Save Image As".
 3.  **Mobile:** Long-press the cart image -> "Save to Files" / "Download Image".
 
 ### 3. Import
+
 Open Pocket8, tap the `+` icon, and select the `.p8.png` file you just saved.
 
 > **Coming Soon: Tap to Play**
-> I am currently collaborating with Zep (Lexaloffle) on an official integration! Soon, you will be able to hit "Play" directly on the BBS website, and it will automatically launch the game inside Pocket8.
+> I am currently collaborating with Zep (Lexaloffle) on an official integration! Soon, you will be able to hit "Play" directly on the BBS website, and it will automatically launch the game inside Pocket8. This feature is in alpha and may not work for all carts at the moment.
+
+## License & Attribution
+
+- **Pocket8 Source Code**: Licensed under [GPL] (c) 2026 Jevon Lipsey.
+- **PICO-8 Engine**: (c) Lexaloffle Games. The engine runtime used for the iOS build is proprietary software and will **not** be included in this repository.
 
 ## Acknowledgements
 
